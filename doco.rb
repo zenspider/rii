@@ -10,30 +10,37 @@ require "ruby2ruby"
 require "pp"
 
 class Doco < MethodBasedSexpProcessor
+  Klass = Struct.new(:name, :superclass, :comment, :methods) do
+    def << meth
+      self.methods[meth.name] = meth
+    end
+  end
+  Method = Struct.new(:name, :args, :comment)
+
+  attr_accessor :klasses
+  attr_accessor :methods
   attr_accessor :r2r
 
   def initialize
     super
     self.r2r = Ruby2Ruby.new
+    self.klasses = Hash.new { |h,k| h[k] = Klass.new(k, :unknown, :unknown, {}) }
+    self.methods = {}
   end
 
   def massage_comment lines, level=2
     prefix = "  " * (level+1)
     s = lines.lines.map { |line| line.sub(/^ *#+ */, "") }.join(prefix).strip
-    s unless s.empty?
+    prefix+s unless s.empty?
   end
 
   def process_class exp
     super do
+      superklass = exp.first
       name = self.klass_name
-      comment = massage_comment exp.comments
+      comment = massage_comment exp.comments, 1
 
-      if comment then
-        puts "  class %s:\n    %s" % [name, comment]
-      else
-        puts "  class %s:" % [name]
-      end
-      puts
+      klasses[name] = Klass.new(name, superklass, comment, {})
 
       process_until_empty exp
     end
@@ -45,12 +52,27 @@ class Doco < MethodBasedSexpProcessor
       msg = self.method_name[1..-1]
       comment = massage_comment exp.comments
 
-      if comment then
-        puts "    def %s %p:\n      %s" % [msg, args, comment]
-        puts
-      end
+      klasses[klass_name] << Method.new(msg, args, comment)
 
       process_until_empty exp
+    end
+  end
+
+  def generate
+    klasses.each do |k,v|
+      if v.comment then
+        puts "  class %s:\n%s" % [v.name, v.comment]
+      else
+        puts "  class %s:" % [v.name]
+      end
+      puts
+
+      v.methods.each do |_, meth|
+        if meth.comment then
+          puts "    def %s %p:\n%s" % [meth.name, meth.args, meth.comment]
+          puts
+        end
+      end
     end
   end
 end
@@ -64,3 +86,5 @@ ARGV.each do |dir|
     doco.process rp.parse File.read(path), path
   end
 end
+
+doco.generate
